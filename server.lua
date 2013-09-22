@@ -36,13 +36,13 @@ assert(socket ~= nil, "Socket library missing!")
 -- Webserver configuration
 WebServer = {
 	-- Listening port
-	port = 8080,
+	port = 80,
 	
 	-- Format of all dates
 	dateFormat = "!%a, %d %b %Y %H:%M:%S %Z",
 	
 	-- Server name. Go on, be witty.
-	serverName = "LOLLOOOOL " .. _VERSION .. " httpd",
+	serverName = "LuaHTTPD on ".._VERSION,
 	
 	-- HTTP status code values.
 	http = {
@@ -112,14 +112,18 @@ WebServer = {
 
 -- Starts the webserver
 function WebServer:run()
-	self.server = socket.bind("localhost", self.port)
+	self.server,err = socket.bind("0.0.0.0", self.port)
+	if err then
+	    print(err)
+	    os.exit(1)
+	end
 	self.server:settimeout(0.01)
 	self:mainLoop()
 end
 
 -- Accepts all clients
 function WebServer:mainLoop()
-	while true do
+    while true do
 		local client = self.server:accept()
 		if client then
 			-- Register the client
