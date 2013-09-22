@@ -45,6 +45,11 @@ split=function(sString, sSeparator, nMax, bRegexp)
 	return aRecord
 end
 
+-- Gets the dir a file is in
+getDir=function(path)
+	local splitPath=split(path:gsub("\\","/"),"/")
+	return table.concat(splitPath[#splitPath-1],"/")
+end
 -- Gets a module file
 getModule=function(name) 
 	local modpath = "module/" .. name .. ".mod.lua"
