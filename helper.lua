@@ -19,7 +19,7 @@
 
 -- PHP-like split() function, probably has issues with non-sanitized
 -- patterns.
-function split(sString, sSeparator, nMax, bRegexp)
+split=function(sString, sSeparator, nMax, bRegexp)
 	assert(sSeparator ~= '')
 	assert(nMax == nil or nMax >= 1)
 	if (sString == nil) then error("String expected!", 2) end
@@ -46,7 +46,7 @@ function split(sString, sSeparator, nMax, bRegexp)
 end
 
 -- Gets a module file
-function getModule(name) 
+getModule=function(name) 
 	local modpath = "module/" .. name .. ".mod.lua"
 	local fhandle, ex = io.open(modpath, "r")
 	if not fhandle then error(ex) end
@@ -69,7 +69,7 @@ function getModule(name)
 end
 
 -- Parses a path
-function parsePath(path)
+parsePath=function(path)
 	local fragments = split(path:gsub("\\","/"), "/")
 	local parsed = {}
 	local parsedIndex = 1
