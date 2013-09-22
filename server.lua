@@ -96,6 +96,13 @@ WebServer = {
 		["default"] = { {}, "text/plain" },
 	},
 	
+	-- Directory handlers.
+	-- Format: ["folder relative to httproot"]={getModule("module-name"),"handler name"}
+	-- "" as a folder means httproot.
+	dirHandler = {
+		-- ["/somedir"]={getModule"some-module","handler"},
+		-- ["/someotherdir"]={getModule"some-module","handler"}
+	},
 	-- Client storage cache.
 	clients = {}
 }
@@ -198,36 +205,51 @@ function WebServer:handleClient(client)
 		-- Produce the real-world filepath
 		local filepath = table.concat(parsePath("http/" .. request.path), "/")
 		if not (lfs.attributes(filepath, "mode")) then -- Not a file or folder
-			self:formatStatusTemplate(response, { ["statusnum"] = 404, ["filename"] = request.path })
-		elseif (lfs.attributes(filepath, "mode") == "file") then -- A file
-			-- Open
-			local handle, ex = io.open(filepath, "r")
-			if not handle then 
-				-- Can't handle the things? Okay.
-				self:formatStatusTemplate(response, { ["statusnum"] = 500, ["filename"] = request.path, ["errordata"] = ex })
+			if WebServer.dirHandler[getDir(filepath)] then
+				response.handler=WebServer.dirHandler[http_dir][1]
+				response.handlerName=WebServer.dirHandler[http_dir][2]
+				response.handlerCall=response.handler.directory
 			else
-				-- Read all the data!
-				local fdata = {}
-				for line in handle:lines() do table.insert(fdata, line) end
-				handle:close()
-				-- Indicate a 200 when we send
-				response.status = self.http["200"][1]
-				response.data = table.concat(fdata, "\n")
+				self:formatStatusTemplate(response, { ["statusnum"] = 404, ["filename"] = request.path })
+			end
+		elseif (lfs.attributes(filepath, "mode") == "file") then -- A file
+			if WebServer.dirHandler[getDir(filepath)] then
+				response.handler=WebServer.dirHandler[http_dir][1]
+				response.handlerName=WebServer.dirHandler[http_dir][2]
+				response.handlerCall=response.handler.directory
+			else
+				-- Open
+				local handle, ex = io.open(filepath, "r")
+				if not handle then 
+					-- Can't handle the things? Okay.
+					self:formatStatusTemplate(response, { ["statusnum"] = 500, ["filename"] = request.path, ["errordata"] = ex })
+				else
+					-- Read all the data!
+					local fdata = {}
+					for line in handle:lines() do table.insert(fdata, line) end
+					handle:close()
+					-- Indicate a 200 when we send
+					response.status = self.http["200"][1]
+					response.data = table.concat(fdata, "\n")
 				
-				-- Try and locate a MIME for this
-				local fileparts = split(filepath, ".")
-				for groupName, groupData in pairs(self.mime) do
-					for _, extension in pairs(groupData[1]) do
-						if (extension == fileparts[#fileparts]) then
-							response.mime = groupData[2]
-							response.handlerName = groupData[3]
-							response.handler = groupData[4]
-							break
+					-- Try and locate a MIME for this
+					local fileparts = split(filepath, ".")
+					for groupName, groupData in pairs(self.mime) do
+						for _, extension in pairs(groupData[1]) do
+							if (extension == fileparts[#fileparts]) then
+								response.mime = groupData[2]
+								if groupData[3] then
+									response.handlerName = groupData[3]
+									response.handler = groupData[4]
+									response.handlerCall = groupData[3].call
+								end
+								break
+							end
 						end
 					end
+					-- No MIME -> fallback to `default`
+					if (response.mime == "") then response.mime = self.mime["default"][2] end
 				end
-				-- No MIME -> fallback to `default`
-				if (response.mime == "") then response.mime = self.mime["default"][2] end
 			end
 		else
 			if (lfs.attributes(filepath, "mode") == "directory") then -- Directory index
@@ -236,20 +258,26 @@ function WebServer:handleClient(client)
 				-- Indicate a 200 when we send
 				response.status = self.http["200"][1]
 				local http_dir = string.gsub(filepath, "http", "") -- Strip out HTTP garbage (again)
-				-- Make a pretty heading
-				response.data = "Directory index for " .. http_dir .. "<br /><br />\n\n<pre>"
-				for filename in lfs.dir(filepath) do -- iter: items in dir;
-					local subfile = filepath .. "/" .. filename
-					if (subfile ~= "") then -- File isn't a ghost?
-						local http_path = string.gsub(subfile, "http", "") -- Strip out HTTP garbage (hurr)
-						-- Write padded mode
-						response.data = response.data .. string.pad(lfs.attributes(subfile, "mode"), 24, " ", true)
-						-- Write padded link -> text
-						response.data = response.data .. "<a href='" .. http_path .. "'>" .. filename .. "</a>" .. "\n"
+				if WebServer.dirHandler[http_dir] then -- See if there are any directory handlers for it.
+					response.handler=WebServer.dirHandler[http_dir][1]
+					response.handlerName=WebServer.dirHandler[http_dir][2]
+					response.handlerCall=response.handler.directory
+				else			
+					-- Make a pretty heading
+					response.data = "Directory index for " .. http_dir .. "<br /><br />\n\n<pre>"
+					for filename in lfs.dir(filepath) do -- iter: items in dir;
+						local subfile = filepath .. "/" .. filename
+						if (subfile ~= "") then -- File isn't a ghost?
+							local http_path = string.gsub(subfile, "http", "") -- Strip out HTTP garbage (hurr)
+							-- Write padded mode
+							response.data = response.data .. string.pad(lfs.attributes(subfile, "mode"), 24, " ", true)
+							-- Write padded link -> text
+							response.data = response.data .. "<a href='" .. http_path .. "'>" .. filename .. "</a>" .. "\n"
+						end
 					end
+					-- Wrap up
+					response.data = response.data .. "</pre><hr><pre>" .. WebServer.serverName .. ".\nIt is now " .. os.date(WebServer.dateFormat) .. ".</pre>"
 				end
-				-- Wrap up
-				response.data = response.data .. "</pre><hr><pre>" .. WebServer.serverName .. ".\nIt is now " .. os.date(WebServer.dateFormat) .. ".</pre>"
 			else -- Probably a symlink or ghost or something funky
 				self:formatStatusTemplate(response, { ["statusnum"] = 500, ["filename"] = request.path,
 					["errordata"] = ("Unknown file type: " .. ((lfs.attributes(filepath, "mode")) or 'nil') .. " for " .. filepath) })
@@ -257,9 +285,9 @@ function WebServer:handleClient(client)
 		end
 		
 		-- Is there a registered handler?
-		if (response.handler) then
+		if (response.handlerCall) then
 			-- "Don't be a fool; wrap your tool."
-			local ok, err = pcall(function() response = response.handler:call(request, response) end)
+			local ok, err = pcall(function() response = response.handlerCall(request, response) end)
 			if not ok then 
 				-- Report we failed
 				self:formatStatusTemplate(response, { ["statusnum"] = 500, ["filename"] = request.path,
